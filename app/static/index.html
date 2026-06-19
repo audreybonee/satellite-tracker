@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Satellite Tracker</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      overflow: hidden;
+      background: #000;
+      color: #e2e8f0;
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      user-select: none;
+    }
+
+    canvas { display: block; }
+
+    /* ── Loading ────────────────────────────────────────── */
+    #loading {
+      position: fixed; inset: 0; z-index: 200;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 14px; background: #000;
+      transition: opacity 0.6s ease;
+    }
+    #loading.fade-out { opacity: 0; pointer-events: none; }
+
+    .spinner {
+      width: 42px; height: 42px;
+      border: 3px solid rgba(56,189,248,0.15);
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading p { font-size: 13px; color: #475569; }
+
+    /* ── Glass card base ────────────────────────────────── */
+    .glass {
+      background: rgba(5, 9, 22, 0.82);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+    }
+
+    /* ── HUD ────────────────────────────────────────────── */
+    #hud {
+      position: fixed; top: 20px; left: 20px; z-index: 20;
+      width: 228px; padding: 18px 20px;
+    }
+
+    #hud h1 {
+      font-size: 12px; font-weight: 800;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: #f8fafc; margin-bottom: 3px;
+    }
+    .hint { font-size: 10px; color: #475569; margin-bottom: 18px; line-height: 1.5; }
+
+    .legend { display: flex; flex-direction: column; gap: 8px; }
+    .legend-row {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 12px; color: #94a3b8;
+    }
+    .ldot {
+      width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+    }
+
+    #status {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(255,255,255,0.07);
+      font-size: 11px; color: #475569; line-height: 1.6;
+    }
+
+    /* ── Timeline ───────────────────────────────────────── */
+    #timeline {
+      position: fixed; bottom: 28px;
+      left: 50%; transform: translateX(-50%);
+      z-index: 20;
+      display: flex; align-items: center; gap: 14px;
+      padding: 14px 26px;
+      width: min(560px, 90vw);
+    }
+
+    .tl-bound { font-size: 11px; color: #475569; white-space: nowrap; }
+
+    #year-display {
+      font-size: 22px; font-weight: 800; letter-spacing: -0.02em;
+      color: #f8fafc; min-width: 54px; text-align: right;
+    }
+
+    #year-slider {
+      flex: 1;
+      -webkit-appearance: none; appearance: none;
+      height: 3px; border-radius: 2px; outline: none; cursor: pointer;
+      background: linear-gradient(
+        to right,
+        #38bdf8 var(--fill, 100%),
+        rgba(255,255,255,0.12) var(--fill, 100%)
+      );
+    }
+    #year-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px; height: 18px; border-radius: 50%; cursor: pointer;
+      background: #f8fafc;
+      box-shadow: 0 0 0 2.5px #38bdf8, 0 0 14px rgba(56,189,248,0.7);
+    }
+    #year-slider::-moz-range-thumb {
+      width: 18px; height: 18px; border-radius: 50%; border: none; cursor: pointer;
+      background: #f8fafc;
+      box-shadow: 0 0 0 2.5px #38bdf8, 0 0 14px rgba(56,189,248,0.7);
+    }
+
+    /* ── Info panel ─────────────────────────────────────── */
+    #info {
+      position: fixed; top: 20px;
+      right: -340px;
+      z-index: 20; width: 296px; padding: 20px 22px;
+      transition: right 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    #info.open { right: 20px; }
+
+    .iheader {
+      display: flex; justify-content: space-between;
+      align-items: flex-start; margin-bottom: 18px; gap: 10px;
+    }
+    .iname {
+      font-size: 14px; font-weight: 700; color: #f8fafc;
+      line-height: 1.35; flex: 1; word-break: break-word;
+    }
+    .iclose {
+      width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+      color: #64748b; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; line-height: 1;
+      transition: background 0.15s, color 0.15s;
+    }
+    .iclose:hover { background: rgba(255,255,255,0.10); color: #cbd5e1; }
+
+    .isect {
+      font-size: 9px; font-weight: 700;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: #2d3f55; margin: 14px 0 7px;
+    }
+
+    .irow {
+      display: flex; justify-content: space-between;
+      align-items: baseline; padding: 5px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      font-size: 12px;
+    }
+    .irow:last-child { border-bottom: none; }
+    .rl { color: #4b5f7a; }
+    .rv { color: #e2e8f0; font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+
+<!-- Loading screen -->
+<div id="loading">
+  <div class="spinner"></div>
+  <p id="loading-msg">Initializing satellite tracker…</p>
+</div>
+
+<!-- HUD -->
+<div id="hud" class="glass">
+  <h1>Satellite Tracker</h1>
+  <div class="hint">Drag to rotate &middot; Scroll to zoom &middot; Click a satellite</div>
+  <div class="legend">
+    <div class="legend-row">
+      <div class="ldot" style="background:#00eeff;box-shadow:0 0 7px #00eeff99"></div>
+      <span>Starlink</span>
+    </div>
+    <div class="legend-row">
+      <div class="ldot" style="background:#ffd700;box-shadow:0 0 7px #ffd70099"></div>
+      <span>GPS</span>
+    </div>
+    <div class="legend-row">
+      <div class="ldot" style="background:#00ff88;box-shadow:0 0 7px #00ff8899"></div>
+      <span>Weather / ISS</span>
+    </div>
+    <div class="legend-row">
+      <div class="ldot" style="background:#7a90b0;box-shadow:0 0 5px #7a90b066"></div>
+      <span>Other</span>
+    </div>
+  </div>
+  <div id="status">Loading…</div>
+</div>
+
+<!-- Timeline -->
+<div id="timeline" class="glass">
+  <div class="tl-bound">2000</div>
+  <input id="year-slider" type="range" min="2000" max="2026" value="2026"/>
+  <div class="tl-bound">2026</div>
+  <div id="year-display">2026</div>
+</div>
+
+<!-- Info panel -->
+<div id="info" class="glass">
+  <div class="iheader">
+    <div class="iname" id="iName">—</div>
+    <button class="iclose" id="iClose">✕</button>
+  </div>
+
+  <div class="isect">Identity</div>
+  <div class="irow"><span class="rl">Country</span><span class="rv" id="iCountry">—</span></div>
+  <div class="irow"><span class="rl">Launch Year</span><span class="rv" id="iLaunch">—</span></div>
+  <div class="irow"><span class="rl">Constellation</span><span class="rv" id="iGroup">—</span></div>
+
+  <div class="isect">Orbital State</div>
+  <div class="irow"><span class="rl">Altitude</span><span class="rv" id="iAlt">—</span></div>
+  <div class="irow"><span class="rl">Velocity</span><span class="rv" id="iVel">—</span></div>
+
+  <div class="isect">Keplerian Elements</div>
+  <div class="irow"><span class="rl">Inclination</span><span class="rv" id="iInc">—</span></div>
+  <div class="irow"><span class="rl">Eccentricity</span><span class="rv" id="iEcc">—</span></div>
+  <div class="irow"><span class="rl">Mean Motion</span><span class="rv" id="iMM">—</span></div>
+  <div class="irow"><span class="rl">RAAN</span><span class="rv" id="iRaan">—</span></div>
+  <div class="irow"><span class="rl">Arg. of Perigee</span><span class="rv" id="iAop">—</span></div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const DAY_URL   = 'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg';
+const NIGHT_URL = 'https://unpkg.com/three-globe/example/img/earth-night.jpg';
+const EARTH_R   = 6371;
+
+// ── Renderer ──────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.01, 500);
+camera.position.set(0, 0, 2.8);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+controls.minDistance   = 1.2;
+controls.maxDistance   = 14;
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ── Stars ─────────────────────────────────────────────────
+{
+  const N = 4000;
+  const pos = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const r   = 70 + Math.random() * 30;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const th  = Math.random() * Math.PI * 2;
+    pos[i*3]   = r * Math.sin(phi) * Math.cos(th);
+    pos[i*3+1] = r * Math.sin(phi) * Math.sin(th);
+    pos[i*3+2] = r * Math.cos(phi);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  scene.add(new THREE.Points(geo, new THREE.PointsMaterial({
+    size: 0.1, color: 0xffffff, transparent: true, opacity: 0.75,
+    sizeAttenuation: false,
+  })));
+}
+
+// ── Earth (day/night shader) ──────────────────────────────
+function placeholderTex(hex) {
+  const c = Object.assign(document.createElement('canvas'), { width: 1, height: 1 });
+  c.getContext('2d').fillStyle = hex;
+  c.getContext('2d').fillRect(0, 0, 1, 1);
+  return new THREE.CanvasTexture(c);
+}
+
+const earthUniforms = {
+  dayTex:  { value: placeholderTex('#0c3a5a') },
+  nightTex:{ value: placeholderTex('#00001e') },
+  sunDir:  { value: new THREE.Vector3(1, 0.15, 0).normalize() },
+};
+
+const earthMat = new THREE.ShaderMaterial({
+  uniforms: earthUniforms,
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    varying vec3 vWorldNormal;
+    void main() {
+      vUv = uv;
+      vWorldNormal = normalize(mat3(modelMatrix) * normal);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */`
+    uniform sampler2D dayTex;
+    uniform sampler2D nightTex;
+    uniform vec3 sunDir;
+    varying vec2 vUv;
+    varying vec3 vWorldNormal;
+    void main() {
+      float cosA = dot(normalize(vWorldNormal), normalize(sunDir));
+      float t    = smoothstep(-0.12, 0.12, cosA);
+      vec4 day   = texture2D(dayTex,   vUv);
+      vec4 night = texture2D(nightTex, vUv) * 1.7;
+      gl_FragColor = mix(night, day, t);
+    }
+  `,
+});
+
+const earth = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), earthMat);
+scene.add(earth);
+
+// ── Atmosphere glow ───────────────────────────────────────
+const atmMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(1.058, 64, 64),
+  new THREE.ShaderMaterial({
+    uniforms: { camPos: { value: camera.position } },
+    vertexShader: /* glsl */`
+      varying vec3 vWN;
+      varying vec3 vWP;
+      void main() {
+        vWN = normalize(mat3(modelMatrix) * normal);
+        vWP = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform vec3 camPos;
+      varying vec3 vWN;
+      varying vec3 vWP;
+      void main() {
+        vec3 viewDir = normalize(camPos - vWP);
+        float f = 1.0 - abs(dot(normalize(vWN), viewDir));
+        f = pow(f, 2.6) * 0.55;
+        gl_FragColor = vec4(0.18, 0.52, 1.0, f);
+      }
+    `,
+    transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.FrontSide,
+  })
+);
+scene.add(atmMesh);
+
+// Load NASA textures asynchronously — earth shows placeholder until ready
+{
+  const tl  = new THREE.TextureLoader();
+  const lod = url => new Promise((res, rej) => tl.load(url, res, undefined, rej));
+  Promise.allSettled([lod(DAY_URL), lod(NIGHT_URL)]).then(([d, n]) => {
+    if (d.status === 'fulfilled') { earthUniforms.dayTex.value  = d.value; }
+    if (n.status === 'fulfilled') { earthUniforms.nightTex.value = n.value; }
+  });
+}
+
+// ── Satellite glow sprite ─────────────────────────────────
+const glowTex = (() => {
+  const size = 96, h = size / 2;
+  const c = Object.assign(document.createElement('canvas'), { width: size, height: size });
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(h, h, 0, h, h, h);
+  g.addColorStop(0,    'rgba(255,255,255,1)');
+  g.addColorStop(0.28, 'rgba(255,255,255,0.75)');
+  g.addColorStop(0.60, 'rgba(255,255,255,0.18)');
+  g.addColorStop(1,    'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(c);
+})();
+
+// ── Constellation color map ───────────────────────────────
+function satColor(groupName) {
+  const g = (groupName || '').toLowerCase();
+  if (g.includes('starlink'))                            return [0.00, 0.93, 1.00]; // cyan
+  if (g.includes('gps'))                                return [1.00, 0.84, 0.00]; // gold
+  if (g.includes('weather'))                            return [0.00, 1.00, 0.53]; // green
+  if (g.includes('station') || g.includes('iss'))      return [0.00, 1.00, 0.53]; // green
+  return [0.48, 0.56, 0.69]; // slate-blue
+}
+
+// ── Satellite data & scene management ─────────────────────
+let allSats   = [];
+let satPoints = null;
+
+function launchYear(sat) {
+  const m = (sat.object_id || '').match(/^(\d{4})/);
+  return m ? +m[1] : new Date(sat.epoch).getFullYear();
+}
+
+function buildSatPoints(sats) {
+  const n   = sats.length;
+  const pos = new Float32Array(n * 3);
+  const col = new Float32Array(n * 3);
+  const s   = 1 / EARTH_R;
+
+  sats.forEach((sat, i) => {
+    pos[i*3]   = sat.x_km * s;
+    pos[i*3+1] = sat.z_km * s;
+    pos[i*3+2] = sat.y_km * s;
+    const c = satColor(sat.group_name);
+    col[i*3]   = c[0]; col[i*3+1] = c[1]; col[i*3+2] = c[2];
+  });
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+
+  const mat = new THREE.PointsMaterial({
+    size: 0.017,
+    map: glowTex,
+    vertexColors: true,
+    transparent: true,
+    opacity: 1.0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    sizeAttenuation: true,
+  });
+
+  const pts = new THREE.Points(geo, mat);
+  pts.userData.sats = sats;
+  return pts;
+}
+
+function redraw(maxYear) {
+  const visible = allSats.filter(s => launchYear(s) <= maxYear);
+  if (satPoints) scene.remove(satPoints);
+  satPoints = visible.length ? buildSatPoints(visible) : null;
+  if (satPoints) scene.add(satPoints);
+
+  document.getElementById('status').textContent =
+    `${visible.length.toLocaleString()} / ${allSats.length.toLocaleString()} satellites`;
+}
+
+// ── Timeline UI ───────────────────────────────────────────
+const slider   = document.getElementById('year-slider');
+const yearDisp = document.getElementById('year-display');
+
+function syncSlider() {
+  const pct = ((+slider.value - +slider.min) / (+slider.max - +slider.min)) * 100;
+  slider.style.setProperty('--fill', `${pct}%`);
+  yearDisp.textContent = slider.value;
+}
+
+slider.addEventListener('input', () => {
+  syncSlider();
+  redraw(+slider.value);
+});
+syncSlider();
+
+// ── Info panel ────────────────────────────────────────────
+const infoEl = document.getElementById('info');
+document.getElementById('iClose').addEventListener('click', () => infoEl.classList.remove('open'));
+
+function fmt(v, dec, suffix = '') {
+  return v != null ? `${(+v).toFixed(dec)}${suffix}` : '—';
+}
+
+function showInfo(sat) {
+  const vel = Math.sqrt(sat.vx_km_s ** 2 + sat.vy_km_s ** 2 + sat.vz_km_s ** 2);
+
+  document.getElementById('iName').textContent    = sat.name;
+  document.getElementById('iCountry').textContent = sat.country || '—';
+  document.getElementById('iLaunch').textContent  = launchYear(sat);
+  document.getElementById('iGroup').textContent   = sat.group_name || '—';
+  document.getElementById('iAlt').textContent     = fmt(sat.altitude_km, 1, ' km');
+  document.getElementById('iVel').textContent     = `${vel.toFixed(3)} km/s`;
+  document.getElementById('iInc').textContent     = fmt(sat.inclination, 4, '°');
+  document.getElementById('iEcc').textContent     = fmt(sat.eccentricity, 7);
+  document.getElementById('iMM').textContent      = fmt(sat.mean_motion, 8, ' rev/day');
+  document.getElementById('iRaan').textContent    = fmt(sat.ra_of_asc_node, 4, '°');
+  document.getElementById('iAop').textContent     = fmt(sat.arg_of_pericenter, 4, '°');
+
+  infoEl.classList.add('open');
+}
+
+// ── Raycasting / click ────────────────────────────────────
+const rc    = new THREE.Raycaster();
+rc.params.Points.threshold = 0.016;
+
+const mouse    = new THREE.Vector2();
+let dragOrigin = null;
+
+renderer.domElement.addEventListener('mousedown', e => {
+  dragOrigin = { x: e.clientX, y: e.clientY };
+});
+
+renderer.domElement.addEventListener('click', e => {
+  if (!dragOrigin) return;
+  const wasDrag = Math.hypot(e.clientX - dragOrigin.x, e.clientY - dragOrigin.y) > 4;
+  dragOrigin = null;
+  if (wasDrag || !satPoints) return;
+
+  mouse.set(
+    (e.clientX / innerWidth)  *  2 - 1,
+    (e.clientY / innerHeight) * -2 + 1
+  );
+  rc.setFromCamera(mouse, camera);
+  const hits = rc.intersectObject(satPoints);
+
+  if (hits.length) {
+    showInfo(satPoints.userData.sats[hits[0].index]);
+  } else {
+    infoEl.classList.remove('open');
+  }
+});
+
+// ── Animation ─────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  earth.rotation.y += 0.0006;
+  // camera.position is the same object reference stored in the uniform — auto-updates
+  renderer.render(scene, camera);
+}
+
+// ── Bootstrap ─────────────────────────────────────────────
+async function init() {
+  const res  = await fetch('http://127.0.0.1:8000/api/positions');
+  const data = await res.json();
+
+  // Safely extract the satellites array from the nested JSON object
+  allSats = data.satellites || [];
+
+  redraw(+slider.value);
+  document.getElementById('loading').classList.add('fade-out');
+  setTimeout(() => { document.getElementById('loading').style.display = 'none'; }, 700);
+}
+
+animate();
+init().catch(err => {
+  console.error(err);
+  document.getElementById('loading-msg').textContent =
+    'Could not load satellites. Run the ingest script first.';
+});
+</script>
+</body>
+</html>
